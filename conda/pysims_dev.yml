@@ -1,0 +1,26 @@
+name: pysims_dev
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  # Run
+  - click >=8.0
+  - pandas >=1.4
+  - pandemy >=1.1
+  - python >=3.10
+  - requests >=2.26
+  - toml >=0.10
+
+  # Test
+  - pytest >=7.0
+  - pytest-cov >=3.0
+
+  # Build
+  - python-build >=0.7
+  - setuptools >=61.0
+  - twine >=3.7
+
+  # Tools
+  - black >=22.0
+  - flake8 >=4.0
+  - mypy >=0.910
