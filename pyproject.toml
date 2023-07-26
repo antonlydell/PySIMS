@@ -55,7 +55,7 @@ version = {attr = "pysims.__version__"}
 
 
 [tool.black]
-line-length = 98
+line-length = 100
 target-version = ["py38"]
 skip-string-normalization = true
 
@@ -68,3 +68,9 @@ testpaths = "tests"
 markers = [ 
     "raises: Tests that are expected to raise an exception.",
 ]
+
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+warn_return_any = true
+warn_unreachable = true
