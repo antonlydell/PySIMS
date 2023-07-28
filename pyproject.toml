@@ -10,7 +10,7 @@ authors = [
 description = "The CLI for managing IoT sensors and meter data."
 readme = "README.rst"
 license = { file="LICENSE" }
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 1 - Planning",
     "Environment :: Console",
