@@ -7,6 +7,7 @@ from typing import Any
 
 # Third Party
 import pytest
+from pydantic import HttpUrl
 from sqlalchemy.engine import make_url, URL
 
 # Local
@@ -18,13 +19,22 @@ from pysims.config import (
     Database,
     DatabaseSection,
     ExportSection,
+    FileLogHandler,
+    LOGGING_DEFAULT_DATETIME_FORMAT,
+    LOGGING_DEFAULT_FILE_PATH,
+    LOGGING_DEFAULT_FORMAT,
+    LoggingSection,
+    LogHandler,
+    LogLevels,
     NetmoreSensorPortal,
     SensorPortalSection,
     SQLiteDatabase,
     SQLITE_DEFAULT_DB_FILE_PATH,
+    StreamLogHandler,
+    Streams,
     UserSection,
 )
-from pysims import exceptions, settings
+from pysims import exceptions
 
 
 # =============================================================================================
@@ -50,14 +60,14 @@ def default_config(mocked_system_username_env_var: str) -> dict[str, Any]:
             'backend': 'sqlite',
             'schema': '',
             'prefix': 'pysims',
-            'sqlite': {'url': '', 'path': settings.SQLITE_DEFAULT_DB_FILE_PATH},
+            'sqlite': {'url': '', 'path': SQLITE_DEFAULT_DB_FILE_PATH},
         },
         'portal': {
             'portal': 'netmore',
             'netmore': {
                 'username': '',
                 'password': '',
-                'base_url': '',
+                'base_url': HttpUrl(url='', scheme='https'),
                 'sensor_id_column': 'dev_eui',
             },
         },
@@ -70,6 +80,27 @@ def default_config(mocked_system_username_env_var: str) -> dict[str, Any]:
                 'delim': ';',
                 'encoding': 'UTF-8',
                 'extension': '.csv',
+            },
+        },
+        'logging': {
+            'disabled': False,
+            'min_log_level': LogLevels.INFO,
+            'format': LOGGING_DEFAULT_FORMAT,
+            'datetime_format': LOGGING_DEFAULT_DATETIME_FORMAT,
+            'stream': {
+                'disabled': False,
+                'min_log_level': LogLevels.INFO,
+                'format': LOGGING_DEFAULT_FORMAT,
+                'datetime_format': LOGGING_DEFAULT_DATETIME_FORMAT,
+                'streams': (Streams.STDERR,),
+            },
+            'file': {
+                'disabled': False,
+                'min_log_level': LogLevels.INFO,
+                'format': LOGGING_DEFAULT_FORMAT,
+                'datetime_format': LOGGING_DEFAULT_DATETIME_FORMAT,
+                'path': LOGGING_DEFAULT_FILE_PATH,
+                'username_in_filename': False,
             },
         },
     }
@@ -681,6 +712,187 @@ class TestExportSection:
         print(exc_info_str)
 
         assert _format in exc_info_str, 'format not in error message!'
+
+        # Clean up - None
+        # ===========================================================
+
+
+class TestLogHandler:
+    r"""Tests for the config model `LogHandler`.
+
+    The `LogHandler` is the base class for a log handler.
+    """
+
+    @pytest.mark.parametrize(
+        'min_log_level, min_log_level_exp',
+        (
+            pytest.param(LogLevels.WARNING, LogLevels.WARNING, id='LogLevels.WARNING'),
+            pytest.param(10, LogLevels.DEBUG, id='int=10'),
+        ),
+    )
+    def test_init_with_min_log_level(
+        self, min_log_level: LogLevels | int, min_log_level_exp: LogLevels
+    ) -> None:
+        r"""Test to create an instance of `LogHandler` with different values for `min_log_level`."""
+
+        # Setup - None
+        # ===========================================================
+
+        # Exercise
+        # ===========================================================
+        lh = LogHandler(min_log_level=min_log_level)  # type: ignore
+
+        # Verify
+        # ===========================================================
+        assert lh.min_log_level == min_log_level_exp
+
+        # Clean up - None
+        # ===========================================================
+
+
+class TestStreamLogHandler:
+    r"""Tests for the config model `StreamLogHandler`.
+
+    The `StreamLogHandler` class defines the configuration for the stream log handler.
+    """
+
+    @pytest.mark.parametrize(
+        'streams, streams_exp',
+        (
+            pytest.param(
+                [Streams.STDIN, Streams.STDOUT, Streams.STDERR],
+                (Streams.STDIN, Streams.STDOUT, Streams.STDERR),
+                id='list[Streams]',
+            ),
+            pytest.param(
+                ['stdout', 'stderr'],
+                (Streams.STDOUT, Streams.STDERR),
+                id='list[str]',
+            ),
+            pytest.param((Streams.STDOUT,), (Streams.STDOUT,), id='tuple[Streams]'),
+            pytest.param(
+                {Streams.STDIN, Streams.STDOUT, Streams.STDERR},
+                (Streams.STDIN, Streams.STDOUT, Streams.STDERR),
+                id='set[Streams]',
+            ),
+            pytest.param(
+                [Streams.STDERR, Streams.STDOUT, Streams.STDOUT],
+                (Streams.STDERR, Streams.STDOUT),
+                id='list[Streams] with duplicate',
+            ),
+        ),
+    )
+    def test_init(
+        self,
+        streams: list[Streams] | list[str] | tuple[Streams] | set[str],
+        streams_exp: tuple[Streams],
+    ) -> None:
+        r"""Test to create an instance of `StreamLogHandler`."""
+
+        # Setup - None
+        # ===========================================================
+
+        # Exercise
+        # ===========================================================
+        sh = StreamLogHandler(streams=streams)  # type: ignore
+
+        # Verify
+        # ===========================================================
+        for stream in streams_exp:
+            assert stream in sh.streams, f'{stream=} not in StreamLogHandler.streams!'
+
+        # Clean up - None
+        # ===========================================================
+
+
+class TestFileLogHandler:
+    r"""Tests for the config model `FileLogHandler`.
+
+    The `FileLogHandler` class defines the configuration for the file log handler.
+    """
+
+    def test_init(self) -> None:
+        r"""Test to create an instance of `FileLogHandler`."""
+
+        # Setup
+        # ===========================================================
+        path = Path.cwd() / 'pysims.log'
+        username_in_filename = True
+
+        # Exercise
+        # ===========================================================
+        sh = FileLogHandler(path=path, username_in_filename=username_in_filename)
+
+        # Verify
+        # ===========================================================
+        assert sh.path == path, 'key "path" is incorrect!'
+        assert (
+            sh.username_in_filename == username_in_filename
+        ), 'key "username_in_filename" is incorrect!'
+
+        # Clean up - None
+        # ===========================================================
+
+    @pytest.mark.raises
+    def test_invalid_log_file_path(self) -> None:
+        r"""Test to supply a directory instead of a file to the `path` attribute.
+
+        `exceptions.ConfigError` is expected to be raised.
+        """
+
+        # Setup
+        # ===========================================================
+        path = Path.cwd()
+
+        # Exercise
+        # ===========================================================
+        with pytest.raises(exceptions.ConfigError) as exc_info:
+            FileLogHandler(path=path)
+
+        # Verify
+        # ===========================================================
+        exc_info_str = exc_info.exconly()
+        print(exc_info_str)
+
+        assert 'path' in exc_info_str, 'path not in error message!'
+
+        # Clean up - None
+        # ===========================================================
+
+
+class TestLoggingSection:
+    r"""Tests for the config model `LoggingSection`.
+
+    The `LoggingSection` class defines the logging section in the configuration.
+    """
+
+    def test_init(self) -> None:
+        r"""Test to create an instance of `LoggingSection`."""
+
+        # Setup
+        # ===========================================================
+        disabled = True
+        min_log_level = LogLevels.CRITICAL
+        _format = 'some format'
+        datetime_format = r'%y-%m-%d'
+
+        # Exercise
+        # ===========================================================
+        l = LoggingSection(
+            disabled=disabled,
+            min_log_level=min_log_level,
+            format=_format,
+            datetime_format=datetime_format,
+        )
+
+        # Verify
+        # ===========================================================
+        assert l.disabled == disabled, 'disabled key is incorrect!'
+        assert l.min_log_level == min_log_level, 'min_log_level key is incorrect!'
+        assert l.format == _format, 'format key is incorrect!'
+        assert l.datetime_format == datetime_format, 'datetime_format key is incorrect!'
+        assert l.stream.dict() == StreamLogHandler().dict(), 'stream key is incorrect!'
+        assert l.file.dict() == FileLogHandler().dict(), 'file key is incorrect!'
 
         # Clean up - None
         # ===========================================================

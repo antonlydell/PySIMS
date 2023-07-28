@@ -5,6 +5,7 @@ The configuration constants of PySIMS are also stored here.
 """
 
 # Standard Library
+from enum import IntEnum, StrEnum
 import logging
 import os
 from pathlib import Path
@@ -43,7 +44,7 @@ PROG_DIR = Path.home() / f'.{PROG_NAME}'
 CONFIG_FILENAME = f'.{PROG_NAME}.toml'
 
 # The full path to the user configuration file.
-USER_CONFIG_FILE_PATH: Path = PROG_DIR / CONFIG_FILENAME
+USER_CONFIG_FILE_PATH = PROG_DIR / CONFIG_FILENAME
 
 # The displayable name of the full path to the user config file.
 USER_CONFIG_FILE_PATH_DISPLAY = click.format_filename(USER_CONFIG_FILE_PATH)
@@ -60,6 +61,26 @@ SQLITE_DEFAULT_DB_FILE_PATH = PROG_DIR / SQLITE_DEFAULT_DB_FILENAME
 # The displayable name of the full path to the default SQLite database.
 SQLITE_DEFAULT_DB_FILE_PATH_DISPLAY = click.format_filename(SQLITE_DEFAULT_DB_FILE_PATH)
 
+# The default name of the log file.
+LOGGING_DEFAULT_FILENAME = f'{PROG_NAME}.log'
+
+# The default log file directory.
+LOGGING_DEFAULT_DIR = PROG_DIR / 'logs'
+
+# The full path to the default log file.
+LOGGING_DEFAULT_FILE_PATH = LOGGING_DEFAULT_DIR / LOGGING_DEFAULT_FILENAME
+
+# The displayable name of the full path to the default log file.
+LOGGING_DEFAULT_FILE_PATH_DISPLAY = click.format_filename(LOGGING_DEFAULT_FILE_PATH)
+
+# The default format of a log message.
+LOGGING_DEFAULT_FORMAT = (
+    r'%(asctime)s|%(name)s|%(levelname)s|%(funcName)s|Line:%(lineno)s|%(message)s'
+)
+
+# The default date format of a log message.
+LOGGING_DEFAULT_DATETIME_FORMAT = r'%Y-%m-%dT%H:%M:%S'
+
 # Mapping of platform to system username environment variable.
 PLATFORM_SYSTEM_USERNAME_ENV_VARS = {
     'linux': 'USER',
@@ -67,6 +88,30 @@ PLATFORM_SYSTEM_USERNAME_ENV_VARS = {
     'cygwin': 'USERNAME',  # Windows
     'darwin': 'USERNAME',  # MacOS
 }
+
+
+# ===============================================================
+# Enums
+# ===============================================================
+
+
+class LogLevels(IntEnum):
+    r"""The available log levels."""
+
+    NOTSET = 0
+    DEBUG = 10
+    INFO = 20
+    WARNING = 30
+    ERROR = 40
+    CRITICAL = 50
+
+
+class Streams(StrEnum):
+    r"""The available input and output streams."""
+
+    STDIN = 'stdin'
+    STDOUT = 'stdout'
+    STDERR = 'stderr'
 
 
 # ===============================================================
@@ -417,6 +462,122 @@ class ExportSection(BaseConfigModel):
             return v_case
 
 
+class LogHandler(BaseConfigModel):
+    r"""The base model of a log handler.
+
+    A log handler handles the log messages produced by the program.
+
+    Parameters
+    ----------
+    disabled : bool, default False
+        True if the log handler should be disabled and False to keep it active.
+
+    min_log_level : LogLevels, default LogLevels.INFO
+        The minimum log level sent to the log handler.
+
+    format : str, default `LOGGING_DEFAULT_FORMAT`
+        The format string of the log message.
+        See https://docs.python.org/3/library/logging.html#logrecord-attributes
+        for a syntax reference.
+
+    datetime_format : str, default `LOGGING_DEFAULT_DATETIME_FORMAT`
+        The format string of the logging timestamp.
+        Uses `time.strftime` syntax. See https://docs.python.org/3/library/time.html#time.strftime
+        for a syntax reference.
+    """
+
+    disabled: bool = False
+    min_log_level: LogLevels = LogLevels.INFO
+    format: str = LOGGING_DEFAULT_FORMAT
+    datetime_format: str = LOGGING_DEFAULT_DATETIME_FORMAT
+
+
+class StreamLogHandler(LogHandler):
+    r"""The stream log handler logs messages to the output streams stdout and or stderr.
+
+    Parameters
+    ----------
+    streams : Sequence[Streams], default (Streams.STDERR,)
+        The output streams to send the log messages to.
+        The default `Streams.STDERR` logs to stderr.
+    """
+
+    streams: tuple[Streams, ...] = (Streams.STDERR,)
+
+    @validator('streams')
+    def deduplicate_streams(cls, v: tuple[Streams, ...]) -> tuple[Streams, ...]:
+        r"""Remove duplicates from the `streams` attribute."""
+
+        return tuple(set(v))
+
+
+class FileLogHandler(LogHandler):
+    r"""The file log handler logs messages to a log file.
+
+    Parameters
+    ----------
+    path : Path, default `LOGGING_DEFAULT_FILE_PATH`
+        The path to the log file.
+
+    username_in_filename : bool, default False
+        True if the username of the user should be prepended
+        to the log filename and False otherwise.
+    """
+
+    path: Path = LOGGING_DEFAULT_FILE_PATH
+    username_in_filename: bool = False
+
+    @validator('path')
+    def validate_path(cls, v: Path) -> Path:
+        r"""Validate the `path` attribute."""
+
+        if v.is_dir():
+            error_msg = (
+                f'The log file path must be a file and not a directory! '
+                f'path = {click.format_filename(v)}'
+            )
+            raise ValueError(error_msg)
+        else:
+            return v
+
+
+class LoggingSection(BaseConfigModel):
+    r"""The configuration of the logging section in the config file.
+
+    Parameters
+    ----------
+    disabled : bool, default False
+        True if all log handlers should be disabled and False otherwise.
+
+    min_log_level : LogLevels, default LogLevels.INFO
+        The minimum log level sent to the log handlers. Used as a fallback
+        if a minimum log level is not set on a log handler.
+
+    format : str, default `LOGGING_DEFAULT_FORMAT`
+        The format string of the log message.
+        See https://docs.python.org/3/library/logging.html#logrecord-attributes
+        for a syntax reference.
+
+    datetime_format : str, default `LOGGING_DEFAULT_DATETIME_FORMAT`
+        The format string of the logging timestamp.
+        Uses `time.strftime` syntax. See https://docs.python.org/3/library/time.html#time.strftime
+        for a syntax reference.
+
+    stream : StreamLogHandler
+        The configuration of the stream log handler.
+
+    file : FileLogHandler
+        The configuration of the file log handler.
+    """
+
+    disabled: bool = False
+    min_log_level: LogLevels = LogLevels.INFO
+    format: str = LOGGING_DEFAULT_FORMAT
+    datetime_format: str = LOGGING_DEFAULT_DATETIME_FORMAT
+    stream: StreamLogHandler = Field(default_factory=StreamLogHandler)
+    file: FileLogHandler = Field(default_factory=FileLogHandler)
+
+
 class ConfigManager(BaseSettings):
     r"""The `ConfigManager` handles the program's configuration.
 
@@ -437,6 +598,9 @@ class ConfigManager(BaseSettings):
 
     export : ExportSection
         The export section of the configuration.
+
+    logging : LoggingSection
+        The logging section of the configuration.
     """
 
     editor: str = ''
@@ -444,6 +608,7 @@ class ConfigManager(BaseSettings):
     database: DatabaseSection = Field(default_factory=DatabaseSection)
     portal: SensorPortalSection = Field(default_factory=SensorPortalSection)
     export: ExportSection = Field(default_factory=ExportSection)
+    logging: LoggingSection = Field(default_factory=LoggingSection)
 
     class Config:
         env_prefix = 'pysims_'
