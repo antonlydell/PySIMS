@@ -10,7 +10,7 @@ import logging
 import os
 from pathlib import Path
 import sys
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Sequence
 
 # Third Party
 import click
@@ -637,3 +637,107 @@ class ConfigManager(BaseSettings):
             super().__init__(**kwargs)
         except ValidationError as e:
             raise exceptions.ConfigError(str(e)) from None
+
+
+# ===============================================================
+# Functions
+# ===============================================================
+
+
+ConfigDict = dict[str, Any]
+
+
+def merge_config_dicts(dicts: Sequence[ConfigDict]) -> ConfigDict:
+    r"""Merge a sequence of config dictionaries.
+
+    The highest priority dictionary should be the last item in the sequence.
+    E.g. dicts[0] < dicts[1] < dicts[2]
+
+    Parameters
+    ----------
+    dicts : Sequence[ConfigDict]
+        The config dictionaries to merge together.
+        The highest priority dictionary should be the last item in the sequence.
+
+    Returns
+    -------
+    merged : ConfigDict
+        The result of the merged dictionaries.
+    """
+
+    def _merge_config_dicts(
+        dicts: Sequence[ConfigDict], to_update: ConfigDict, key_1: str, key_2: str | None = None
+    ) -> None:
+        r"""Helper function to merge dictionaries.
+
+        Updates the config dict `to_update` inplace with the result of the merge.
+        If the result of the merge is an empty dict `to_update` is not updated.
+
+        Parameters
+        ----------
+        dicts : Sequence[ConfigDict]
+            The config dictionaries to merge together.
+
+        to_udpate : ConfigDict
+            The dictionary to update with the result of the merge.
+            The result is assigned to `key_1` and `key_2` if `key_2`
+            is not None.
+
+        key_1 : str
+            The top level key to extract from the config dictionaries.
+
+        key_2 : str | None, default None
+            The second level key to extract from the config dictionaries.
+        """
+
+        result: ConfigDict = {}
+        if key_2 is None:
+            to_merge = [c.get(key_1, {}) for c in dicts]
+        else:
+            to_merge = [c.get(key_1, {}).get(key_2, {}) for c in dicts]
+
+        for d in to_merge:
+            result |= d  # Update result with data from d and assign to result
+
+        if result:
+            if key_2 is None:
+                to_update[key_1] = result
+            else:
+                to_update[key_1][key_2] = result
+
+    merged: ConfigDict = {}
+    if (nr_config_dicts := len(dicts)) == 0:
+        return merged
+    elif nr_config_dicts == 1:
+        return dicts[0]
+    else:
+        pass
+
+    if all(not c for c in dicts):  # If all dicts are empty
+        return merged
+
+    # editor
+    editor = [e for conf in dicts if (e := conf.get('editor')) is not None]
+    merged['editor'] = editor.pop()
+
+    # user section
+    _merge_config_dicts(to_update=merged, dicts=dicts, key_1='user')
+
+    # database section
+    _merge_config_dicts(to_update=merged, dicts=dicts, key_1='database')
+    _merge_config_dicts(to_update=merged, dicts=dicts, key_1='database', key_2='sqlite')
+
+    # portal section
+    _merge_config_dicts(to_update=merged, dicts=dicts, key_1='portal')
+    _merge_config_dicts(to_update=merged, dicts=dicts, key_1='portal', key_2='netmore')
+
+    # export section
+    _merge_config_dicts(to_update=merged, dicts=dicts, key_1='export')
+    _merge_config_dicts(to_update=merged, dicts=dicts, key_1='export', key_2='csv')
+
+    # logging section
+    _merge_config_dicts(to_update=merged, dicts=dicts, key_1='logging')
+    _merge_config_dicts(to_update=merged, dicts=dicts, key_1='logging', key_2='stream')
+    _merge_config_dicts(to_update=merged, dicts=dicts, key_1='logging', key_2='file')
+
+    return merged
