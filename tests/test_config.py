@@ -2,6 +2,7 @@ r"""Unit tests for the config module."""
 
 # Standard library
 from pathlib import Path
+from copy import deepcopy
 import sys
 from typing import Any
 
@@ -26,6 +27,7 @@ from pysims.config import (
     LoggingSection,
     LogHandler,
     LogLevels,
+    merge_config_dicts,
     NetmoreSensorPortal,
     SensorPortalSection,
     SQLiteDatabase,
@@ -38,12 +40,19 @@ from pysims import exceptions
 
 
 # =============================================================================================
+# Types
+# =============================================================================================
+
+ConfigDict = dict[str, Any]
+
+
+# =============================================================================================
 # Fixtures
 # =============================================================================================
 
 
 @pytest.fixture()
-def default_config(mocked_system_username_env_var: str) -> dict[str, Any]:
+def default_config(mocked_system_username_env_var: str) -> ConfigDict:
     r"""The default configuration of `ConfigManager`."""
 
     return {
@@ -104,6 +113,257 @@ def default_config(mocked_system_username_env_var: str) -> dict[str, Any]:
             },
         },
     }
+
+
+@pytest.fixture(scope='module')
+def env_user_local_config() -> tuple[ConfigDict, ConfigDict, ConfigDict]:
+    r"""Config dicts for the `env`, `user` and `local` configurations.
+
+    These dicts can be used to test the function `pysims.config.merge_config_dicts`.
+    """
+
+    env_config = {
+        'editor': '',
+        'user': {
+            'username_from_env_var': True,
+            'session_key_expiry': 900,
+            'set_session_key_env_var': True,
+        },
+        'database': {
+            'backend': 'sqlite',
+            'schema': 'pysims',
+            'sqlite': {'path': '/path/to/pysims.sqlite'},
+        },
+        'portal': {
+            'portal': 'netmore',
+            'netmore': {
+                'username': 'a7x',
+                'password': 'chapter_four',
+                'base_url': 'https://api.a7x.com',
+                'sensor_id_column': 'dev_eui',
+            },
+        },
+        'export': {
+            'format': 'csv',
+            'creation_datetime': True,
+            'output_dir': '.',
+        },
+        'logging': {
+            'disabled': False,
+            'min_log_level': LogLevels.WARNING,
+            'format': LOGGING_DEFAULT_FORMAT,
+            'datetime_format': LOGGING_DEFAULT_DATETIME_FORMAT,
+            'stream': {
+                'disabled': False,
+                'min_log_level': LogLevels.INFO,
+                'format': LOGGING_DEFAULT_FORMAT,
+                'datetime_format': LOGGING_DEFAULT_DATETIME_FORMAT,
+                'streams': [Streams.STDERR],
+            },
+            'file': {
+                'disabled': False,
+                'min_log_level': LogLevels.INFO,
+                'format': LOGGING_DEFAULT_FORMAT,
+                'datetime_format': LOGGING_DEFAULT_DATETIME_FORMAT,
+                'path': LOGGING_DEFAULT_FILE_PATH,
+                'username_in_filename': False,
+            },
+        },
+    }
+
+    user_config = {
+        'editor': 'vim',
+        'user': {
+            'username_from_env_var': True,
+            'username': 'm.shadows',
+        },
+        'database': {
+            'schema': '',
+            'sqlite': {'url': 'sqlite:////path/to/pysims.db'},
+        },
+        'export': {
+            'creation_datetime': False,
+        },
+        'logging': {
+            'disabled': True,
+            'min_log_level': LogLevels.WARNING,
+            'stream': {
+                'disabled': False,
+                'min_log_level': LogLevels.DEBUG,
+            },
+            'file': {
+                'min_log_level': LogLevels.WARNING,
+                'username_in_filename': True,
+            },
+        },
+    }
+
+    local_config = {
+        'editor': 'code',
+        'user': {
+            'username': 'zacky.v',
+            'session_key_expiry': 1000,
+            'set_session_key_env_var': False,
+        },
+        'export': {
+            'format': 'csv',
+            'creation_datetime': True,
+            'output_dir': '..',
+            'csv': {
+                'delim': ',',
+                'encoding': 'Windows-1252',
+            },
+        },
+        'logging': {
+            'disabled': False,
+            'min_log_level': LogLevels.CRITICAL,
+            'format': r'%(asctime)s',
+            'datetime_format': r'%Y-%m-%d',
+            'stream': {
+                'disabled': True,
+                'min_log_level': LogLevels.INFO,
+                'streams': ('stderr', 'stdout'),
+            },
+        },
+    }
+
+    return env_config, user_config, local_config
+
+
+@pytest.fixture()
+def merged_env_user_config(
+    env_user_local_config: tuple[ConfigDict, ConfigDict, ConfigDict]
+) -> ConfigDict:
+    r"""The result of merging the config dicts `env` and `user`."""
+
+    env_config, user_config, _ = env_user_local_config
+    merged_config = deepcopy(env_config)
+
+    merged_config['editor'] = user_config['editor']
+    merged_config['user']['username_from_env_var'] = user_config['user']['username_from_env_var']
+    merged_config['user']['username'] = user_config['user']['username']
+    merged_config['database']['schema'] = user_config['database']['schema']
+    merged_config['database']['sqlite']['url'] = user_config['database']['sqlite']['url']
+    merged_config['export']['creation_datetime'] = user_config['export']['creation_datetime']
+    merged_config['logging']['disabled'] = user_config['logging']['disabled']
+    merged_config['logging']['min_log_level'] = user_config['logging']['min_log_level']
+    merged_config['logging']['stream']['disabled'] = user_config['logging']['stream']['disabled']
+    merged_config['logging']['stream']['min_log_level'] = user_config['logging']['stream'][
+        'min_log_level'
+    ]
+    merged_config['logging']['file']['min_log_level'] = user_config['logging']['file'][
+        'min_log_level'
+    ]
+    merged_config['logging']['file']['username_in_filename'] = user_config['logging']['file'][
+        'username_in_filename'
+    ]
+
+    return merged_config
+
+
+@pytest.fixture()
+def merged_env_local_config(
+    env_user_local_config: tuple[ConfigDict, ConfigDict, ConfigDict]
+) -> ConfigDict:
+    r"""The result of merging the config dicts `env` and `local`."""
+
+    env_config, _, local_config = env_user_local_config
+    merged_config = deepcopy(env_config)
+
+    merged_config['editor'] = local_config['editor']
+    merged_config['user']['username'] = local_config['user']['username']
+    merged_config['user']['session_key_expiry'] = local_config['user']['session_key_expiry']
+    merged_config['user']['set_session_key_env_var'] = local_config['user'][
+        'set_session_key_env_var'
+    ]
+    merged_config['export']['format'] = local_config['export']['format']
+    merged_config['export']['creation_datetime'] = local_config['export']['creation_datetime']
+    merged_config['export']['output_dir'] = local_config['export']['output_dir']
+    merged_config['export']['csv'] = local_config['export']['csv']
+    merged_config['logging']['disabled'] = local_config['logging']['disabled']
+    merged_config['logging']['min_log_level'] = local_config['logging']['min_log_level']
+    merged_config['logging']['format'] = local_config['logging']['format']
+    merged_config['logging']['datetime_format'] = local_config['logging']['datetime_format']
+    merged_config['logging']['stream']['disabled'] = local_config['logging']['stream']['disabled']
+    merged_config['logging']['stream']['min_log_level'] = local_config['logging']['stream'][
+        'min_log_level'
+    ]
+    merged_config['logging']['stream']['streams'] = local_config['logging']['stream']['streams']
+
+    return merged_config
+
+
+@pytest.fixture()
+def merged_env_user_local_config(
+    env_user_local_config: tuple[ConfigDict, ConfigDict, ConfigDict]
+) -> ConfigDict:
+    r"""The result of merging the config dicts `env`, `user` and `local`."""
+
+    env_config, user_config, local_config = env_user_local_config
+    merged_config = deepcopy(env_config)
+
+    merged_config['editor'] = local_config['editor']
+    merged_config['user']['username_from_env_var'] = user_config['user']['username_from_env_var']
+    merged_config['user']['username'] = local_config['user']['username']
+    merged_config['user']['session_key_expiry'] = local_config['user']['session_key_expiry']
+    merged_config['user']['set_session_key_env_var'] = local_config['user'][
+        'set_session_key_env_var'
+    ]
+    merged_config['database']['schema'] = user_config['database']['schema']
+    merged_config['database']['sqlite']['url'] = user_config['database']['sqlite']['url']
+    merged_config['export']['format'] = local_config['export']['format']
+    merged_config['export']['creation_datetime'] = local_config['export']['creation_datetime']
+    merged_config['export']['output_dir'] = local_config['export']['output_dir']
+    merged_config['export']['csv'] = local_config['export']['csv']
+    merged_config['logging']['disabled'] = local_config['logging']['disabled']
+    merged_config['logging']['min_log_level'] = local_config['logging']['min_log_level']
+    merged_config['logging']['format'] = local_config['logging']['format']
+    merged_config['logging']['datetime_format'] = local_config['logging']['datetime_format']
+    merged_config['logging']['stream']['disabled'] = local_config['logging']['stream']['disabled']
+    merged_config['logging']['stream']['min_log_level'] = local_config['logging']['stream'][
+        'min_log_level'
+    ]
+    merged_config['logging']['stream']['streams'] = local_config['logging']['stream']['streams']
+    merged_config['logging']['file']['min_log_level'] = user_config['logging']['file'][
+        'min_log_level'
+    ]
+    merged_config['logging']['file']['username_in_filename'] = user_config['logging']['file'][
+        'username_in_filename'
+    ]
+
+    return merged_config
+
+
+@pytest.fixture()
+def merged_user_local_config(
+    env_user_local_config: tuple[ConfigDict, ConfigDict, ConfigDict]
+) -> ConfigDict:
+    r"""The result of merging the config dicts `user` and `local`."""
+
+    _, user_config, local_config = env_user_local_config
+    merged_config = deepcopy(user_config)
+
+    merged_config['editor'] = local_config['editor']
+    merged_config['user']['username'] = local_config['user']['username']
+    merged_config['user']['session_key_expiry'] = local_config['user']['session_key_expiry']
+    merged_config['user']['set_session_key_env_var'] = local_config['user'][
+        'set_session_key_env_var'
+    ]
+    merged_config['export']['format'] = local_config['export']['format']
+    merged_config['export']['creation_datetime'] = local_config['export']['creation_datetime']
+    merged_config['export']['output_dir'] = local_config['export']['output_dir']
+    merged_config['export']['csv'] = local_config['export']['csv']
+    merged_config['logging']['disabled'] = local_config['logging']['disabled']
+    merged_config['logging']['min_log_level'] = local_config['logging']['min_log_level']
+    merged_config['logging']['format'] = local_config['logging']['format']
+    merged_config['logging']['datetime_format'] = local_config['logging']['datetime_format']
+    merged_config['logging']['stream']['disabled'] = local_config['logging']['stream']['disabled']
+    merged_config['logging']['stream']['min_log_level'] = local_config['logging']['stream'][
+        'min_log_level'
+    ]
+    merged_config['logging']['stream']['streams'] = local_config['logging']['stream']['streams']
+
+    return merged_config
 
 
 # =============================================================================================
@@ -905,7 +1165,7 @@ class TestInitConfigManager:
     """
 
     @pytest.mark.usefixtures('mocked_system_username_env_var')
-    def test_default_config(self, default_config: dict[str, Any]) -> None:
+    def test_default_config(self, default_config: ConfigDict) -> None:
         r"""Test to create an instance of `ConfigManager` with all default values.
 
         The config values not specified should be filled in with the default values.
@@ -1020,6 +1280,161 @@ class TestInitConfigManager:
         assert not hasattr(
             cm.database, 'unknown_section_key_2'
         ), 'Key "unknown_section_2" found on cm.database!'
+
+        # Clean up - None
+        # ===========================================================
+
+
+class TestMergeConfigDicts:
+    r"""Tests for the function `pysims.config.merge_config_dicts`."""
+
+    def test_empty_sequence(self) -> None:
+        r"""Test to supply an empty sequence.
+
+        An empty dict is expected to be returned.
+        """
+
+        # Setup - None
+        # ===========================================================
+
+        # Exercise
+        # ===========================================================
+        merged = merge_config_dicts(dicts=[])
+
+        # Verify
+        # ===========================================================
+        assert merged == {}
+
+        # Clean up - None
+        # ===========================================================
+
+    def test_all_dicts_in_sequence_are_empty(self) -> None:
+        r"""Test to supply a sequence of empty dicts.
+
+        An empty dict is expected to be returned.
+        """
+
+        # Setup - None
+        # ===========================================================
+
+        # Exercise
+        # ===========================================================
+        merged = merge_config_dicts(dicts=[{}, {}, {}, {}])
+
+        # Verify
+        # ===========================================================
+        assert merged == {}
+
+        # Clean up - None
+        # ===========================================================
+
+    def test_merge_one_config_dict(
+        self, env_user_local_config: tuple[ConfigDict, ConfigDict, ConfigDict]
+    ) -> None:
+        r"""Test to process only one config dict.
+
+        The merge process should be short circuited and the returned
+        dictionary should be the input dictionary.
+        """
+
+        # Setup
+        # ===========================================================
+        env_config, _, _ = env_user_local_config
+
+        # Exercise
+        # ===========================================================
+        merged_config = merge_config_dicts(dicts=[env_config])
+
+        # Verify
+        # ===========================================================
+        assert merged_config is env_config
+
+        # Clean up - None
+        # ===========================================================
+
+    def test_merge_env_user_config(
+        self,
+        env_user_local_config: tuple[ConfigDict, ConfigDict, ConfigDict],
+        merged_env_user_config: ConfigDict,
+    ) -> None:
+        r"""Test to merge the config dicts `env` and `user`."""
+
+        # Setup
+        # ===========================================================
+        env_config, user_config, _ = env_user_local_config
+
+        # Exercise
+        # ===========================================================
+        merged_config = merge_config_dicts(dicts=(env_config, user_config))
+
+        # Verify
+        # ===========================================================
+        assert merged_config == merged_env_user_config
+
+        # Clean up - None
+        # ===========================================================
+
+    def test_merge_env_local_config(
+        self,
+        env_user_local_config: tuple[ConfigDict, ConfigDict, ConfigDict],
+        merged_env_local_config: ConfigDict,
+    ) -> None:
+        r"""Test to merge the config dicts `env` and `local`."""
+
+        # Setup
+        # ===========================================================
+        env_config, _, local_config = env_user_local_config
+
+        # Exercise
+        # ===========================================================
+        merged_config = merge_config_dicts(dicts=(env_config, local_config))
+
+        # Verify
+        # ===========================================================
+        assert merged_config == merged_env_local_config
+
+        # Clean up - None
+        # ===========================================================
+
+    def test_merge_env_user_local_config(
+        self,
+        env_user_local_config: tuple[ConfigDict, ConfigDict, ConfigDict],
+        merged_env_user_local_config: ConfigDict,
+    ) -> None:
+        r"""Test to merge the config dicts `env`, `user` and `local`."""
+
+        # Setup - None
+        # ===========================================================
+
+        # Exercise
+        # ===========================================================
+        merged_config = merge_config_dicts(dicts=env_user_local_config)
+
+        # Verify
+        # ===========================================================
+        assert merged_config == merged_env_user_local_config
+
+        # Clean up - None
+        # ===========================================================
+
+    def test_merge_user_local_config(
+        self,
+        env_user_local_config: tuple[ConfigDict, ConfigDict, ConfigDict],
+        merged_user_local_config: ConfigDict,
+    ) -> None:
+        r"""Test to merge the config dicts `user` and `local`."""
+
+        # Setup
+        # ===========================================================
+        _, user_config, local_config = env_user_local_config
+
+        # Exercise
+        # ===========================================================
+        merged_config = merge_config_dicts(dicts=[user_config, local_config])
+
+        # Verify
+        # ===========================================================
+        assert merged_config == merged_user_local_config
 
         # Clean up - None
         # ===========================================================
